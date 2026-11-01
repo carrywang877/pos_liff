@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>線上點餐 - LINE LIFF</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- LINE LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <!-- QRCode.js CDN for client-side QR Code generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen pb-24">
+    <div id="app" class="max-w-md mx-auto bg-white min-h-screen shadow-md relative">
+        <!-- 頂部 Header -->
+        <header class="bg-emerald-600 text-white p-4 sticky top-0 z-10 flex justify-between items-center shadow">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <span>🍽️</span> 美味餐廳 點餐
+            </h1>
+            <span v-if="profile" class="text-xs bg-emerald-700 px-2.5 py-1 rounded-full flex items-center gap-1">
+                <img v-if="profile.pictureUrl" :src="profile.pictureUrl" class="w-4 h-4 rounded-full" />
+                {{ profile.displayName }}
+            </span>
+        </header>
+
+        <!-- 菜單列表 -->
+        <main class="p-4 space-y-4">
+            <h2 class="text-lg font-bold text-gray-700 border-b pb-2 flex justify-between items-center">
+                <span>精選餐點</span>
+                <span class="text-xs text-gray-400 font-normal">勾選後至櫃檯出示條碼</span>
+            </h2>
+            
+            <div v-for="item in menu" :key="item.id" class="flex items-center justify-between p-3.5 border rounded-xl shadow-sm hover:border-emerald-200 transition">
+                <div class="flex-1">
+                    <h3 class="font-semibold text-gray-800">{{ item.name }}</h3>
+                    <p class="text-emerald-600 font-bold mt-1">NT$ {{ item.price }}</p>
+                </div>
+                <!-- 數量控制 -->
+                <div class="flex items-center space-x-3 bg-gray-50 p-1.5 rounded-lg border">
+                    <button 
+                        @click="updateQty(item.id, -1)"
+                        :disabled="!cart[item.id]"
+                        class="w-8 h-8 rounded-lg bg-white text-gray-700 font-bold disabled:opacity-30 border shadow-sm hover:bg-gray-100 flex items-center justify-center">
+                        -
+                    </button>
+                    <span class="w-6 text-center font-bold text-gray-800">{{ cart[item.id] || 0 }}</span>
+                    <button 
+                        @click="updateQty(item.id, 1)"
+                        class="w-8 h-8 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 shadow-sm flex items-center justify-center">
+                        +
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部結帳列 -->
+        <footer class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t p-4 flex justify-between items-center z-20 shadow-lg">
+            <div>
+                <p class="text-xs text-gray-500">共 {{ totalCount }} 件餐點</p>
+                <p class="text-xl font-bold text-emerald-600">總計: NT$ {{ totalPrice }}</p>
+            </div>
+            <button 
+                @click="submitOrder" 
+                :disabled="totalCount === 0 || loading"
+                class="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-gray-300 hover:bg-emerald-700 transition flex items-center gap-2 shadow-md">
+                <span v-if="loading" class="animate-spin">⏳</span>
+                <span>{{ loading ? '處理中...' : '生成 POS 掃描碼' }}</span>
+            </button>
+        </footer>
+
+        <!-- POS 掃描 QR Code 彈窗 Modal -->
+        <div v-if="showModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl relative animate-fade-in">
+                <button @click="closeModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
+                
+                <h3 class="text-lg font-bold text-gray-800 mb-1">請向櫃檯出示條碼</h3>
+                <p class="text-xs text-gray-500 mb-4">POS 掃描槍感應此 QR Code 即可完成讀取</p>
+
+                <!-- 二維碼繪製區域 -->
+                <div class="flex justify-center my-4 bg-gray-50 p-4 rounded-xl border border-dashed border-gray-300">
+                    <div id="qrcode" class="p-2 bg-white rounded shadow-sm"></div>
+                </div>
+
+                <!-- 訂單 Token 資訊展示 -->
+                <div class="bg-emerald-50 rounded-xl p-3 text-left mb-4 border border-emerald-100">
+                    <div class="text-xs text-emerald-700 font-semibold mb-1">訂單編號 (Order Token):</div>
+                    <div class="font-mono text-sm font-bold text-emerald-900 break-all select-all">{{ activeToken }}</div>
+                    <div class="mt-2 text-[11px] text-emerald-600 border-t border-emerald-200/60 pt-1 flex justify-between">
+                        <span>餐點總數：{{ totalCount }} 件</span>
+                        <span class="font-bold">金額：NT$ {{ totalPrice }}</span>
+                    </div>
+                </div>
+
+                <p class="text-xs text-gray-400 mb-4">⏱️ 請於 15 分鐘內完成櫃檯出示與結帳</p>
+
+                <button @click="closeModal" class="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition">
+                    關閉畫面
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // 1. 將您的 LIFF ID 替換於此 (例如: "2001234567-AbCdEfGh")
+                const LIFF_ID = "YOUR_LIFF_ID_HERE"; 
+                const profile = ref(null);
+                const loading = ref(false);
+                const showModal = ref(false);
+                const activeToken = ref('');
+<!-- ... existing code -->
