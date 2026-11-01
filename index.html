@@ -71,47 +71,4 @@
             </button>
         </footer>
 
-        <!-- POS 掃描 QR Code 彈窗 Modal -->
-        <div v-if="showModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl relative animate-fade-in">
-                <button @click="closeModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
-                
-                <h3 class="text-lg font-bold text-gray-800 mb-1">請向櫃檯出示條碼</h3>
-                <p class="text-xs text-gray-500 mb-4">POS 掃描槍感應此 QR Code 即可完成讀取</p>
-
-                <!-- 二維碼繪製區域 -->
-                <div class="flex justify-center my-4 bg-gray-50 p-4 rounded-xl border border-dashed border-gray-300">
-                    <div id="qrcode" class="p-2 bg-white rounded shadow-sm"></div>
-                </div>
-
-                <!-- 訂單 Token 資訊展示 -->
-                <div class="bg-emerald-50 rounded-xl p-3 text-left mb-4 border border-emerald-100">
-                    <div class="text-xs text-emerald-700 font-semibold mb-1">訂單編號 (Order Token):</div>
-                    <div class="font-mono text-sm font-bold text-emerald-900 break-all select-all">{{ activeToken }}</div>
-                    <div class="mt-2 text-[11px] text-emerald-600 border-t border-emerald-200/60 pt-1 flex justify-between">
-                        <span>餐點總數：{{ totalCount }} 件</span>
-                        <span class="font-bold">金額：NT$ {{ totalPrice }}</span>
-                    </div>
-                </div>
-
-                <p class="text-xs text-gray-400 mb-4">⏱️ 請於 15 分鐘內完成櫃檯出示與結帳</p>
-
-                <button @click="closeModal" class="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition">
-                    關閉畫面
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const { createApp, ref, computed, onMounted, nextTick } = Vue;
-
-        createApp({
-            setup() {
-                // 1. 將您的 LIFF ID 替換於此 (例如: "2001234567-AbCdEfGh")
-                const LIFF_ID = "YOUR_LIFF_ID_HERE"; 
-                const profile = ref(null);
-                const loading = ref(false);
-                const showModal = ref(false);
-                const activeToken = ref('');
-<!-- ... existing code -->
+        
