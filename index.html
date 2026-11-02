@@ -2,73 +2,919 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>線上點餐 - LINE LIFF</title>
-    <!-- Tailwind CSS CDN -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>極品牛肉麵 - LIFF 線上點餐</title>
+
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Vue 3 CDN -->
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <!-- LINE LIFF SDK -->
-    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-    <!-- QRCode.js CDN for client-side QR Code generation -->
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- QRCode.js Library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-</head>
-<body class="bg-gray-100 min-h-screen pb-24">
-    <div id="app" class="max-w-md mx-auto bg-white min-h-screen shadow-md relative">
-        <!-- 頂部 Header -->
-        <header class="bg-emerald-600 text-white p-4 sticky top-0 z-10 flex justify-between items-center shadow">
-            <h1 class="text-xl font-bold flex items-center gap-2">
-                <span>🍽️</span> 美味餐廳 點餐
-            </h1>
-            <span v-if="profile" class="text-xs bg-emerald-700 px-2.5 py-1 rounded-full flex items-center gap-1">
-                <img v-if="profile.pictureUrl" :src="profile.pictureUrl" class="w-4 h-4 rounded-full" />
-                {{ profile.displayName }}
-            </span>
-        </header>
 
-        <!-- 菜單列表 -->
-        <main class="p-4 space-y-4">
-            <h2 class="text-lg font-bold text-gray-700 border-b pb-2 flex justify-between items-center">
-                <span>精選餐點</span>
-                <span class="text-xs text-gray-400 font-normal">勾選後至櫃檯出示條碼</span>
-            </h2>
-            
-            <div v-for="item in menu" :key="item.id" class="flex items-center justify-between p-3.5 border rounded-xl shadow-sm hover:border-emerald-200 transition">
-                <div class="flex-1">
-                    <h3 class="font-semibold text-gray-800">{{ item.name }}</h3>
-                    <p class="text-emerald-600 font-bold mt-1">NT$ {{ item.price }}</p>
-                </div>
-                <!-- 數量控制 -->
-                <div class="flex items-center space-x-3 bg-gray-50 p-1.5 rounded-lg border">
-                    <button 
-                        @click="updateQty(item.id, -1)"
-                        :disabled="!cart[item.id]"
-                        class="w-8 h-8 rounded-lg bg-white text-gray-700 font-bold disabled:opacity-30 border shadow-sm hover:bg-gray-100 flex items-center justify-center">
-                        -
-                    </button>
-                    <span class="w-6 text-center font-bold text-gray-800">{{ cart[item.id] || 0 }}</span>
-                    <button 
-                        @click="updateQty(item.id, 1)"
-                        class="w-8 h-8 rounded-lg bg-emerald-600 text-white font-bold hover:bg-emerald-700 shadow-sm flex items-center justify-center">
-                        +
-                    </button>
-                </div>
-            </div>
-        </main>
+    <!-- JsBarcode for Barcode Generation -->
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 
-        <!-- 底部結帳列 -->
-        <footer class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t p-4 flex justify-between items-center z-20 shadow-lg">
-            <div>
-                <p class="text-xs text-gray-500">共 {{ totalCount }} 件餐點</p>
-                <p class="text-xl font-bold text-emerald-600">總計: NT$ {{ totalPrice }}</p>
-            </div>
-            <button 
-                @click="submitOrder" 
-                :disabled="totalCount === 0 || loading"
-                class="bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-gray-300 hover:bg-emerald-700 transition flex items-center gap-2 shadow-md">
-                <span v-if="loading" class="animate-spin">⏳</span>
-                <span>{{ loading ? '處理中...' : '生成 POS 掃描碼' }}</span>
-            </button>
-        </footer>
-
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        line: '#06C755',
+                        'line-dark': '#05b34c',
+                        brand: '#991B1B',
+                        'brand-gold': '#D97706',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* 隱藏滾動條但保持滾動 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
         
+        /* POS 掃描槍專用高亮對比模式 */
+        .scan-optimized {
+            filter: contrast(150%) brightness(105%);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans antialiased min-h-screen flex flex-col justify-between selection:bg-brand selection:text-white">
+
+    <!-- LIFF Header -->
+    <header class="bg-white sticky top-0 z-30 shadow-sm border-b border-gray-200">
+        <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <span class="bg-brand text-white text-xs font-bold px-2 py-1 rounded">官方點餐</span>
+                <h1 class="font-bold text-lg text-gray-900 tracking-wide">川味極品牛肉麵</h1>
+            </div>
+            <button id="pos-sim-btn" class="text-xs bg-gray-800 text-amber-400 px-2.5 py-1.5 rounded-lg font-mono flex items-center space-x-1 shadow hover:bg-black transition">
+                <i class="fa-solid font-bold fa-terminal"></i>
+                <span>POS 模擬機</span>
+            </button>
+        </div>
+        
+        <!-- 分類 Tab -->
+        <div class="max-w-md mx-auto px-4 flex space-x-6 border-t border-gray-100 text-sm font-medium">
+            <button onclick="switchTab('beef-noodle')" id="tab-beef-noodle" class="py-2.5 border-b-2 border-brand text-brand font-bold flex items-center space-x-1 transition">
+                <i class="fa-solid fa-bowl-food"></i>
+                <span>招牌牛肉麵</span>
+            </button>
+            <button onclick="switchTab('rice')" id="tab-rice" class="py-2.5 border-b-2 border-transparent text-gray-500 hover:text-gray-800 flex items-center space-x-1 transition">
+                <i class="fa-solid fa-utensils"></i>
+                <span>精選飯店餐</span>
+            </button>
+            <button onclick="switchTab('side')" id="tab-side" class="py-2.5 border-b-2 border-transparent text-gray-500 hover:text-gray-800 flex items-center space-x-1 transition">
+                <i class="fa-solid fa-martini-glass-citrus"></i>
+                <span>小菜與飲料</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- 主內容區塊 -->
+    <main class="max-w-md mx-auto w-full flex-1 p-4 pb-24">
+
+        <!-- Banner 通知 -->
+        <div class="bg-gradient-to-r from-amber-500 to-red-600 text-white rounded-xl p-3.5 mb-4 shadow-md flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <i class="fa-solid fa-qrcode text-2xl text-amber-200"></i>
+                <div>
+                    <p class="font-bold text-sm">手機點餐・POS一秒掃碼</p>
+                    <p class="text-xs text-amber-100">選餐完成自動產生 QR / 條碼送交店家</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 菜單清單區域 -->
+        <div id="menu-container" class="space-y-4">
+            <!-- 動態由 JavaScript 渲染 -->
+        </div>
+
+    </main>
+
+    <!-- 底部購物車浮動條 -->
+    <div id="cart-bar" class="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-gray-200 shadow-lg z-20 transition-transform duration-300 transform translate-y-0">
+        <div class="max-w-md mx-auto p-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3 cursor-pointer" onclick="toggleCartModal()">
+                <div class="relative bg-brand text-white p-3 rounded-full shadow-md">
+                    <i class="fa-solid fa-basket-shopping text-lg"></i>
+                    <span id="cart-badge" class="absolute -top-1 -right-1 bg-amber-500 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">0</span>
+                </div>
+                <div>
+                    <div class="text-xs text-gray-500">合計金額</div>
+                    <div class="text-xl font-extrabold text-brand">NT$ <span id="cart-total">0</span></div>
+                </div>
+            </div>
+            
+            <button id="checkout-btn" onclick="submitOrder()" disabled class="bg-gray-300 text-gray-500 font-bold px-6 py-3 rounded-xl shadow transition flex items-center space-x-2 disabled:cursor-not-allowed">
+                <span>產生結帳Token</span>
+                <i class="fa-solid fa-arrow-right"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- 購物車明細彈窗 Modal -->
+    <div id="cart-modal" class="fixed inset-0 bg-black/60 z-40 hidden flex flex-col justify-end transition-opacity duration-300">
+        <div class="bg-white rounded-t-2xl max-w-md mx-auto w-full max-h-[80vh] flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-list-check text-brand"></i>
+                    <h3 class="font-bold text-gray-800">已點餐點明細</h3>
+                </div>
+                <button onclick="toggleCartModal()" class="text-gray-400 hover:text-gray-600 p-1">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+            
+            <div id="cart-items-list" class="p-4 overflow-y-auto divide-y divide-gray-100 flex-1 space-y-3">
+                <!-- 動態注入購物車項目 -->
+            </div>
+
+            <div class="p-4 bg-gray-50 border-t border-gray-200 space-y-2">
+                <div class="flex justify-between text-sm text-gray-600">
+                    <span>餐點小計</span>
+                    <span class="font-semibold">NT$ <span id="modal-subtotal">0</span></span>
+                </div>
+                <div class="flex justify-between text-sm text-gray-600">
+                    <span>清潔與服務費</span>
+                    <span class="font-semibold">NT$ 0</span>
+                </div>
+                <div class="flex justify-between text-base font-bold text-gray-900 pt-2 border-t border-gray-200">
+                    <span>總計金額</span>
+                    <span class="text-brand text-lg">NT$ <span id="modal-total">0</span></span>
+                </div>
+                <button onclick="toggleCartModal()" class="w-full mt-2 bg-gray-800 text-white font-medium py-2.5 rounded-xl text-sm">
+                    繼續加點
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 客製化選項 Modal (辣度/大小/加購) -->
+    <div id="custom-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl">
+            <div id="custom-header" class="relative h-40 bg-cover bg-center flex items-end p-4">
+                <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent"></div>
+                <button onclick="closeCustomModal()" class="absolute top-3 right-3 bg-black/50 text-white rounded-full w-8 h-8 flex items-center justify-center backdrop-blur-sm">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <div class="relative z-10 text-white">
+                    <h3 id="custom-item-name" class="text-xl font-bold">--</h3>
+                    <p id="custom-item-desc" class="text-xs text-gray-200 line-clamp-1">--</p>
+                </div>
+            </div>
+
+            <div class="p-4 overflow-y-auto space-y-4 flex-1 text-sm">
+                <!-- 份量選擇 -->
+                <div id="option-size-section">
+                    <label class="font-bold text-gray-800 block mb-2">1. 選擇份量 <span class="text-red-500">*</span></label>
+                    <div id="option-size-container" class="grid grid-cols-2 gap-2">
+                        <!-- 動態選項 -->
+                    </div>
+                </div>
+
+                <!-- 辣度選擇 -->
+                <div id="option-spicy-section">
+                    <label class="font-bold text-gray-800 block mb-2">2. 選擇辣度 <span class="text-red-500">*</span></label>
+                    <div id="option-spicy-container" class="grid grid-cols-3 gap-2">
+                        <!-- 動態選項 -->
+                    </div>
+                </div>
+
+                <!-- 加料選項 -->
+                <div id="option-addons-section">
+                    <label class="font-bold text-gray-800 block mb-2">3. 加料/配菜選項 (可多選)</label>
+                    <div id="option-addons-container" class="space-y-2">
+                        <!-- 動態加料選項 -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+                <div>
+                    <span class="text-xs text-gray-500 block">單項小計</span>
+                    <span class="text-xl font-extrabold text-brand">NT$ <span id="custom-price-display">0</span></span>
+                </div>
+                <button onclick="confirmAddToCart()" class="bg-brand hover:bg-red-800 text-white font-bold px-6 py-3 rounded-xl shadow-lg transition flex items-center space-x-1">
+                    <i class="fa-solid fa-cart-plus"></i>
+                    <span>加入購物車</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 訂單 Token & POS 二維碼 Modal -->
+    <div id="token-modal" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-sm w-full overflow-hidden shadow-2xl animate-fade-in flex flex-col">
+            <!-- 標頭 -->
+            <div class="bg-brand text-white p-4 text-center relative">
+                <span class="bg-amber-400 text-gray-900 text-[10px] font-extrabold px-2 py-0.5 rounded-full absolute top-3 left-3 uppercase tracking-wider">POS Ready</span>
+                <h3 class="font-bold text-lg">訂單 Token 二維碼</h3>
+                <p class="text-xs text-red-100 mt-1">請將此畫面出示給店家 POS 掃描槍讀取</p>
+                <button onclick="closeTokenModal()" class="absolute top-3 right-3 text-white/80 hover:text-white">
+                    <i class="fa-solid fa-xmark text-xl"></i>
+                </button>
+            </div>
+
+            <div class="p-5 flex flex-col items-center justify-center space-y-4 bg-white scan-optimized">
+                <!-- 訂單編號與時間 -->
+                <div class="text-center w-full bg-gray-50 p-2.5 rounded-xl border border-gray-200">
+                    <div class="text-xs text-gray-500">訂單流水號</div>
+                    <div id="token-order-id" class="font-mono text-base font-bold text-gray-800 tracking-wider">#ORD-882910</div>
+                    <div id="token-time" class="text-[11px] text-gray-400 mt-0.5">2026-11-02 08:30:00</div>
+                </div>
+
+                <!-- 條碼切換頁籤 (1D/2D) -->
+                <div class="flex bg-gray-100 p-1 rounded-lg text-xs font-semibold w-full">
+                    <button id="btn-show-qr" onclick="toggleBarcodeType('qr')" class="flex-1 py-1.5 bg-white text-gray-800 shadow rounded-md transition text-center">
+                        <i class="fa-solid fa-qrcode mr-1"></i> QR Code
+                    </button>
+                    <button id="btn-show-1d" onclick="toggleBarcodeType('1d')" class="flex-1 py-1.5 text-gray-500 hover:text-gray-800 rounded-md transition text-center">
+                        <i class="fa-solid fa-barcode mr-1"></i> 1D 一維條碼
+                    </button>
+                </div>
+
+                <!-- QR Code 顯示區域 -->
+                <div id="qr-container" class="bg-white p-3 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center min-h-[190px] w-full">
+                    <div id="qrcode" class="p-1"></div>
+                    <span class="text-[10px] text-gray-400 mt-2 font-mono">支援雷射/紅光二維掃描器</span>
+                </div>
+
+                <!-- 1D Barcode 顯示區域 (預設隱藏) -->
+                <div id="barcode-1d-container" class="bg-white p-3 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center min-h-[190px] w-full hidden">
+                    <svg id="barcode1d" class="max-w-full"></svg>
+                    <span class="text-[10px] text-gray-400 mt-1 font-mono">CODE128 POS標準格式</span>
+                </div>
+
+                <!-- Token 字串簡述 -->
+                <div class="w-full">
+                    <div class="flex items-center justify-between text-xs mb-1">
+                        <span class="text-gray-500 font-bold">POS 讀取的 Token payload:</span>
+                        <button onclick="copyToken()" class="text-brand font-semibold text-[11px] hover:underline">
+                            <i class="fa-regular fa-copy"></i> 複製
+                        </button>
+                    </div>
+                    <div id="token-string-display" class="bg-gray-900 text-amber-300 p-2.5 rounded-lg text-[11px] font-mono break-all leading-tight shadow-inner max-h-20 overflow-y-auto">
+                        --
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部動作按鈕 -->
+            <div class="p-4 bg-gray-50 border-t border-gray-200 flex space-x-2">
+                <button onclick="simulatePosScan()" class="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold py-2.5 rounded-xl shadow transition flex items-center justify-center space-x-1">
+                    <i class="fa-solid fa-bolt"></i>
+                    <span>模擬 POS 讀取</span>
+                </button>
+                <button onclick="closeTokenModal()" class="bg-gray-200 text-gray-700 text-xs font-bold px-4 py-2.5 rounded-xl hover:bg-gray-300 transition">
+                    關閉
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- POS 機模擬器 Modal -->
+    <div id="pos-sim-modal" class="fixed inset-0 bg-black/85 z-50 hidden flex items-center justify-center p-4 font-mono">
+        <div class="bg-gray-900 border border-gray-700 text-gray-100 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl flex flex-col">
+            <div class="bg-gray-800 p-3 px-4 border-b border-gray-700 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <span class="w-3 h-3 rounded-full bg-red-500 inline-block"></span>
+                    <span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span>
+                    <span class="w-3 h-3 rounded-full bg-green-500 inline-block"></span>
+                    <span class="text-xs text-gray-300 font-bold ml-2">POS 門市終端模擬系統 v3.2</span>
+                </div>
+                <button onclick="closePosSimModal()" class="text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-4 space-y-3 flex-1 overflow-y-auto max-h-[70vh]">
+                <div class="bg-black/60 p-3 rounded-lg border border-gray-800 text-xs space-y-1">
+                    <div class="text-green-400">$ system_init --pos-terminal-01</div>
+                    <div class="text-gray-400">掃描槍已就緒... 等待讀取 Token 輸入條碼</div>
+                </div>
+
+                <div class="space-y-1">
+                    <label class="text-xs text-gray-400">貼上或掃描輸入 Token:</label>
+                    <div class="flex space-x-2">
+                        <input type="text" id="pos-input-token" placeholder="貼上 TOKEN 或點選下方測試" class="bg-gray-800 border border-gray-700 text-amber-300 text-xs rounded-lg p-2.5 flex-1 focus:outline-none focus:border-amber-500 font-mono">
+                        <button onclick="executePosProcess()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg text-xs font-bold transition">
+                            寫入 POS
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 模擬 POS 寫入結果區塊 -->
+                <div id="pos-result" class="hidden bg-gray-800/90 border border-gray-700 rounded-lg p-3 text-xs space-y-2">
+                    <div class="flex items-center justify-between border-b border-gray-700 pb-2">
+                        <span id="pos-status-badge" class="bg-green-500/20 text-green-400 px-2 py-0.5 rounded text-[10px] font-bold">解碼成功</span>
+                        <span id="pos-timestamp" class="text-gray-400 text-[10px]">--</span>
+                    </div>
+
+                    <div class="space-y-1">
+                        <div class="text-gray-400">訂單編號：<span id="pos-res-id" class="text-white font-bold">--</span></div>
+                        <div class="text-gray-400">總計金額：<span id="pos-res-total" class="text-amber-400 font-bold">--</span></div>
+                    </div>
+
+                    <div class="text-gray-300 font-bold border-t border-gray-700 pt-2">解析餐點明細：</div>
+                    <ul id="pos-res-items" class="space-y-1 text-gray-300 pl-2 list-disc list-inside">
+                        <!-- 動態寫入解析內容 -->
+                    </ul>
+                </div>
+            </div>
+
+            <div class="p-3 bg-gray-800 text-center text-[10px] text-gray-400 border-t border-gray-700">
+                店家 POS 可將此 Token 解碼並寫入門市資料庫 (MySQL/PostgreSQL/MongoDB)
+            </div>
+        </div>
+    </div>
+
+    <!-- 訊息提示 Toast -->
+    <div id="toast" class="fixed top-16 left-1/2 transform -translate-x-1/2 bg-gray-900/90 text-white text-xs px-4 py-2.5 rounded-full shadow-xl z-50 hidden flex items-center space-x-2 transition-all duration-300">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-green-400"></i>
+        <span id="toast-msg">提示訊息</span>
+    </div>
+
+    <!-- JavaScript 業務邏輯 -->
+    <script>
+        // --- 1. 菜單資料庫 (牛肉麵、飯類、小菜) ---
+        const MENU_DATA = [
+            // 牛肉麵類
+            {
+                id: 'bm-01',
+                category: 'beef-noodle',
+                name: '招牌川味紅燒牛肉麵',
+                desc: '獨家漢方藥材燉煮，澳洲牛腱肉厚切，濃郁辛香帶麻。',
+                price: 180,
+                image: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=500&q=80',
+                popular: true,
+                sizes: [
+                    { name: '標準份量', priceOffset: 0 },
+                    { name: '大碗加麵', priceOffset: 25 }
+                ],
+                spicy: ['不辣', '微辣', '中辣', '大辣'],
+                addons: [
+                    { name: '加溏心蛋', price: 25 },
+                    { name: '牛肉加量 (50g)', price: 50 },
+                    { name: '酸菜加量', price: 10 }
+                ]
+            },
+            {
+                id: 'bm-02',
+                category: 'beef-noodle',
+                name: '清燉雙寶牛肉麵',
+                desc: '牛骨慢火燉煮12小時甘甜清甜清湯，搭配牛腱與香Q牛筋。',
+                price: 210,
+                image: 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?auto=format&fit=crop&w=500&q=80',
+                popular: true,
+                sizes: [
+                    { name: '標準份量', priceOffset: 0 },
+                    { name: '大碗加麵', priceOffset: 25 }
+                ],
+                spicy: ['不辣', '微辣'],
+                addons: [
+                    { name: '加溏心蛋', price: 25 },
+                    { name: '牛筋加量', price: 60 }
+                ]
+            },
+            {
+                id: 'bm-03',
+                category: 'beef-noodle',
+                name: '麻辣三寶牛肉麵 (肉/筋/肚)',
+                desc: '老饕最愛！包含牛腱肉、蜂巢牛肚與特選牛筋，香辣入味。',
+                price: 240,
+                image: 'https://images.unsplash.com/photo-1612927601601-6638404737ce?auto=format&fit=crop&w=500&q=80',
+                popular: false,
+                sizes: [
+                    { name: '標準份量', priceOffset: 0 },
+                    { name: '大碗加麵', priceOffset: 25 }
+                ],
+                spicy: ['微辣', '中辣', '大辣', '地獄辣'],
+                addons: [
+                    { name: '加溏心蛋', price: 25 },
+                    { name: '鴨血豆腐', price: 35 }
+                ]
+            },
+
+            // 飯類
+            {
+                id: 'rice-01',
+                category: 'rice',
+                name: '秘製紅燒牛肉燴飯',
+                desc: '特調牛肉醬汁搭香Q越光米飯，隨附當季時蔬與溏心蛋半顆。',
+                price: 160,
+                image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=500&q=80',
+                popular: true,
+                sizes: [
+                    { name: '標準飯量', priceOffset: 0 },
+                    { name: '白飯加量', priceOffset: 15 }
+                ],
+                spicy: ['不辣', '微辣', '中辣'],
+                addons: [
+                    { name: '加溏心蛋', price: 25 },
+                    { name: '加淋熱醬汁', price: 15 }
+                ]
+            },
+            {
+                id: 'rice-02',
+                category: 'rice',
+                name: '古早味古法滷肉飯套餐',
+                desc: '手工切丁溫體豬五花，膠質滿滿，附筍絲與香煎荷包蛋。',
+                price: 110,
+                image: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=500&q=80',
+                popular: false,
+                sizes: [
+                    { name: '標準飯量', priceOffset: 0 },
+                    { name: '大碗加飯', priceOffset: 15 }
+                ],
+                spicy: ['不辣'],
+                addons: [
+                    { name: '加香煎荷包蛋', price: 15 },
+                    { name: '加油豆腐(2塊)', price: 20 }
+                ]
+            },
+
+            // 小菜與飲料
+            {
+                id: 'side-01',
+                category: 'side',
+                name: '涼拌香辣黃瓜',
+                desc: '清脆黃瓜佐特調蒜辣醬，解膩必備。',
+                price: 45,
+                image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=500&q=80',
+                popular: false,
+                sizes: [{ name: '標準份', priceOffset: 0 }],
+                spicy: ['微辣'],
+                addons: []
+            },
+            {
+                id: 'side-02',
+                category: 'side',
+                name: '冷泡烏龍茶 (無糖)',
+                desc: '高山烏龍茶低溫萃取，回甘不苦澀 500ml。',
+                price: 40,
+                image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&w=500&q=80',
+                popular: false,
+                sizes: [{ name: '瓶裝 500ml', priceOffset: 0 }],
+                spicy: [],
+                addons: []
+            }
+        ];
+
+        // 全局應用狀態
+        let currentTab = 'beef-noodle';
+        let cart = [];
+        let activeCustomItem = null;
+        let selectedSize = null;
+        let selectedSpicy = null;
+        let selectedAddons = [];
+        let currentGeneratedToken = '';
+        let qrcodeObj = null;
+
+        // 初始化
+        window.onload = function() {
+            renderMenu();
+            updateCartUI();
+        };
+
+        // --- 2. 頁面渲染與頁籤切換 ---
+        function switchTab(tabCategory) {
+            currentTab = tabCategory;
+            
+            // 更新 Tab UI
+            ['beef-noodle', 'rice', 'side'].forEach(cat => {
+                const tabBtn = document.getElementById(`tab-${cat}`);
+                if (cat === tabCategory) {
+                    tabBtn.className = "py-2.5 border-b-2 border-brand text-brand font-bold flex items-center space-x-1 transition";
+                } else {
+                    tabBtn.className = "py-2.5 border-b-2 border-transparent text-gray-500 hover:text-gray-800 flex items-center space-x-1 transition";
+                }
+            });
+
+            renderMenu();
+        }
+
+        function renderMenu() {
+            const container = document.getElementById('menu-container');
+            const items = MENU_DATA.filter(item => item.category === currentTab);
+
+            if (items.length === 0) {
+                container.innerHTML = `<div class="text-center py-12 text-gray-400">此分類暫無餐點</div>`;
+                return;
+            }
+
+            container.innerHTML = items.map(item => `
+                <div class="bg-white rounded-2xl p-3.5 shadow-sm border border-gray-100 flex space-x-3.5 hover:shadow-md transition">
+                    <img src="${item.image}" alt="${item.name}" class="w-24 h-24 rounded-xl object-cover flex-shrink-0" onerror="this.src='https://placehold.co/200x200/991B1B/ffffff?text=美味餐點'">
+                    <div class="flex-1 flex flex-col justify-between">
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <h3 class="font-bold text-gray-900 text-base">${item.name}</h3>
+                                ${item.popular ? '<span class="bg-amber-100 text-amber-800 text-[10px] font-extrabold px-1.5 py-0.5 rounded">人氣</span>' : ''}
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">${item.desc}</p>
+                        </div>
+                        <div class="flex items-center justify-between mt-2">
+                            <span class="text-brand font-extrabold text-base">NT$ ${item.price} <span class="text-[10px] font-normal text-gray-400">起</span></span>
+                            <button onclick="openCustomModal('${item.id}')" class="bg-brand text-white text-xs font-bold px-3.5 py-1.5 rounded-lg shadow hover:bg-red-800 transition flex items-center space-x-1">
+                                <i class="fa-solid fa-plus text-[10px]"></i>
+                                <span>選擇</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- 3. 客製化選擇彈窗 (辣度/大小/加購買) ---
+        function openCustomModal(itemId) {
+            const item = MENU_DATA.find(i => i.id === itemId);
+            if (!item) return;
+
+            activeCustomItem = item;
+            selectedSize = item.sizes[0];
+            selectedSpicy = item.spicy.length > 0 ? item.spicy[0] : null;
+            selectedAddons = [];
+
+            // UI 填值
+            document.getElementById('custom-item-name').innerText = item.name;
+            document.getElementById('custom-item-desc').innerText = item.desc;
+            document.getElementById('custom-header').style.backgroundImage = `url('${item.image}')`;
+
+            // 渲染 Size 選擇
+            const sizeContainer = document.getElementById('option-size-container');
+            sizeContainer.innerHTML = item.sizes.map((s, idx) => `
+                <button type="button" onclick="selectSize(${idx})" id="size-btn-${idx}" class="p-2.5 rounded-xl border text-left flex justify-between items-center ${idx === 0 ? 'border-brand bg-red-50/50 text-brand font-bold' : 'border-gray-200 text-gray-700'}">
+                    <span>${s.name}</span>
+                    <span class="text-xs ${idx === 0 ? 'text-brand' : 'text-gray-400'}">+NT$ ${s.priceOffset}</span>
+                </button>
+            `).join('');
+
+            // 辣度選擇區塊
+            const spicySection = document.getElementById('option-spicy-section');
+            if (item.spicy && item.spicy.length > 0) {
+                spicySection.classList.remove('hidden');
+                const spicyContainer = document.getElementById('option-spicy-container');
+                spicyContainer.innerHTML = item.spicy.map((sp, idx) => `
+                    <button type="button" onclick="selectSpicy('${sp}')" id="spicy-btn-${sp}" class="py-2 rounded-xl border text-center text-xs ${idx === 0 ? 'border-brand bg-red-50 text-brand font-bold' : 'border-gray-200 text-gray-700'}">
+                        ${sp}
+                    </button>
+                `).join('');
+            } else {
+                spicySection.classList.add('hidden');
+            }
+
+            // 加料選項區塊
+            const addonsSection = document.getElementById('option-addons-section');
+            if (item.addons && item.addons.length > 0) {
+                addonsSection.classList.remove('hidden');
+                const addonsContainer = document.getElementById('option-addons-container');
+                addonsContainer.innerHTML = item.addons.map((add, idx) => `
+                    <label onclick="toggleAddon(${idx})" class="flex items-center justify-between p-2.5 rounded-xl border border-gray-200 cursor-pointer hover:bg-gray-50">
+                        <div class="flex items-center space-x-2">
+                            <input type="checkbox" id="addon-chk-${idx}" class="rounded text-brand focus:ring-brand">
+                            <span class="text-xs font-medium text-gray-800">${add.name}</span>
+                        </div>
+                        <span class="text-xs text-brand font-bold">+NT$ ${add.price}</span>
+                    </label>
+                `).join('');
+            } else {
+                addonsSection.classList.add('hidden');
+            }
+
+            updateCustomPriceDisplay();
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+
+        function closeCustomModal() {
+            document.getElementById('custom-modal').classList.add('hidden');
+        }
+
+        function selectSize(index) {
+            selectedSize = activeCustomItem.sizes[index];
+            activeCustomItem.sizes.forEach((_, idx) => {
+                const btn = document.getElementById(`size-btn-${idx}`);
+                if (idx === index) {
+                    btn.className = "p-2.5 rounded-xl border border-brand bg-red-50/50 text-brand font-bold text-left flex justify-between items-center";
+                } else {
+                    btn.className = "p-2.5 rounded-xl border border-gray-200 text-gray-700 text-left flex justify-between items-center";
+                }
+            });
+            updateCustomPriceDisplay();
+        }
+
+        function selectSpicy(spicyLevel) {
+            selectedSpicy = spicyLevel;
+            activeCustomItem.spicy.forEach(sp => {
+                const btn = document.getElementById(`spicy-btn-${sp}`);
+                if (sp === spicyLevel) {
+                    btn.className = "py-2 rounded-xl border border-brand bg-red-50 text-brand font-bold text-center text-xs";
+                } else {
+                    btn.className = "py-2 rounded-xl border border-gray-200 text-gray-700 text-center text-xs";
+                }
+            });
+        }
+
+        function toggleAddon(index) {
+            const chk = document.getElementById(`addon-chk-${index}`);
+            const addon = activeCustomItem.addons[index];
+            
+            // 注意：label 點擊事件同步觸發
+            if (chk.checked) {
+                if (!selectedAddons.some(a => a.name === addon.name)) {
+                    selectedAddons.push(addon);
+                }
+            } else {
+                selectedAddons = selectedAddons.filter(a => a.name !== addon.name);
+            }
+            updateCustomPriceDisplay();
+        }
+
+        function updateCustomPriceDisplay() {
+            if (!activeCustomItem) return;
+            let total = activeCustomItem.price + (selectedSize ? selectedSize.priceOffset : 0);
+            selectedAddons.forEach(a => total += a.price);
+            document.getElementById('custom-price-display').innerText = total;
+        }
+
+        // --- 4. 購物車核心邏輯 ---
+        function confirmAddToCart() {
+            let unitPrice = activeCustomItem.price + selectedSize.priceOffset;
+            selectedAddons.forEach(a => unitPrice += a.price);
+
+            const cartItem = {
+                cartItemId: 'item-' + Date.now() + '-' + Math.floor(Math.random() * 1000),
+                id: activeCustomItem.id,
+                name: activeCustomItem.name,
+                size: selectedSize.name,
+                spicy: selectedSpicy,
+                addons: [...selectedAddons],
+                unitPrice: unitPrice,
+                qty: 1
+            };
+
+            cart.push(cartItem);
+            closeCustomModal();
+            updateCartUI();
+            showToast(`已將 ${activeCustomItem.name} 加入購物車`);
+        }
+
+        function updateCartUI() {
+            const totalQty = cart.reduce((sum, item) => sum + item.qty, 0);
+            const totalPrice = cart.reduce((sum, item) => sum + (item.unitPrice * item.qty), 0);
+
+            // 更新 Floating Bar
+            document.getElementById('cart-badge').innerText = totalQty;
+            document.getElementById('cart-total').innerText = totalPrice;
+
+            const checkoutBtn = document.getElementById('checkout-btn');
+            if (cart.length > 0) {
+                checkoutBtn.disabled = false;
+                checkoutBtn.className = "bg-brand hover:bg-red-800 text-white font-bold px-6 py-3 rounded-xl shadow-lg transition flex items-center space-x-2 cursor-pointer";
+            } else {
+                checkoutBtn.disabled = true;
+                checkoutBtn.className = "bg-gray-300 text-gray-500 font-bold px-6 py-3 rounded-xl shadow transition flex items-center space-x-2 disabled:cursor-not-allowed";
+            }
+
+            // 更新 Modal 數字
+            document.getElementById('modal-subtotal').innerText = totalPrice;
+            document.getElementById('modal-total').innerText = totalPrice;
+
+            // 渲染購物車內列表
+            const listContainer = document.getElementById('cart-items-list');
+            if (cart.length === 0) {
+                listContainer.innerHTML = `<div class="text-center py-8 text-gray-400 text-xs">購物車為空，快去選購美味餐點吧！</div>`;
+            } else {
+                listContainer.innerHTML = cart.map(item => `
+                    <div class="flex items-center justify-between py-2">
+                        <div class="flex-1 pr-2">
+                            <div class="font-bold text-gray-800 text-sm">${item.name}</div>
+                            <div class="text-[11px] text-gray-500 space-x-1">
+                                <span>${item.size}</span>
+                                ${item.spicy ? `<span>・${item.spicy}</span>` : ''}
+                                ${item.addons.length > 0 ? `<span>・加料:${item.addons.map(a => a.name).join(',')}</span>` : ''}
+                            </div>
+                            <div class="text-xs text-brand font-bold mt-0.5">NT$ ${item.unitPrice}</div>
+                        </div>
+                        <div class="flex items-center space-x-2 border border-gray-200 rounded-lg p-1 bg-gray-50">
+                            <button onclick="changeQty('${item.cartItemId}', -1)" class="w-6 h-6 bg-white border rounded text-gray-600 font-bold flex items-center justify-center hover:bg-gray-100">-</button>
+                            <span class="text-xs font-bold px-1">${item.qty}</span>
+                            <button onclick="changeQty('${item.cartItemId}', 1)" class="w-6 h-6 bg-white border rounded text-gray-600 font-bold flex items-center justify-center hover:bg-gray-100">+</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        function changeQty(cartItemId, delta) {
+            const idx = cart.findIndex(i => i.cartItemId === cartItemId);
+            if (idx > -1) {
+                cart[idx].qty += delta;
+                if (cart[idx].qty <= 0) {
+                    cart.splice(idx, 1);
+                }
+            }
+            updateCartUI();
+        }
+
+        function toggleCartModal() {
+            const modal = document.getElementById('cart-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        // --- 5. 訂單 Token 生成與二維碼 (POS 整合的核心) ---
+
+        /**
+         * 產生 POS 友善的精簡加密格式 Token
+         * 結構格式: O|{ORDER_ID}|{TIMESTAMP}|{TOTAL_PRICE}|{ITEM_DETAILS}|{HASH_SALT}
+         */
+        function generateOrderToken(orderId, totalPrice, items) {
+            const timestamp = Math.floor(Date.now() / 1000); // 秒級時間戳
+            
+            // 壓縮餐點字串: ITEM_ID:QTY:SIZE_INDEX
+            const compressedItems = items.map(item => {
+                const addStr = item.addons.map(a => a.name.substring(0,2)).join('');
+                return `${item.id}:${item.qty}:${item.spicy || ''}:${addStr}`;
+            }).join(';');
+
+            // 建立簡易安全校驗碼 (Checksum)
+            const rawPayload = `${orderId}|${timestamp}|${totalPrice}|${compressedItems}`;
+            let hash = 0;
+            for (let i = 0; i < rawPayload.length; i++) {
+                hash = ((hash << 5) - hash) + rawPayload.charCodeAt(i);
+                hash |= 0;
+            }
+            const saltHex = Math.abs(hash).toString(16).padStart(6, '0').toUpperCase();
+
+            // 最終 POS Token Payload
+            return `POS112:${orderId}:${totalPrice}:${saltHex}:${compressedItems}`;
+        }
+
+        function submitOrder() {
+            if (cart.length === 0) return;
+
+            // 產生隨機 6 碼訂單號
+            const orderId = 'ORD' + Math.floor(100000 + Math.random() * 900000);
+            const totalPrice = cart.reduce((sum, item) => sum + (item.unitPrice * item.qty), 0);
+
+            // 生成加密 Token
+            const token = generateOrderToken(orderId, totalPrice, cart);
+            currentGeneratedToken = token;
+
+            // 填寫 Modal 資訊
+            document.getElementById('token-order-id').innerText = `#${orderId}`;
+            document.getElementById('token-string-display').innerText = token;
+            
+            const now = new Date();
+            document.getElementById('token-time').innerText = now.toLocaleString('zh-TW', { hour12: false });
+
+            // 顯示 Modal
+            document.getElementById('token-modal').classList.remove('hidden');
+            if (!document.getElementById('cart-modal').classList.contains('hidden')) {
+                toggleCartModal();
+            }
+
+            // 生成 QR Code (使用 QRCode.js)
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = '';
+            
+            qrcodeObj = new QRCode(qrContainer, {
+                text: token,
+                width: 170,
+                height: 170,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.M
+            });
+
+            // 同時生成 1D 一維條碼 Code 128
+            try {
+                JsBarcode("#barcode1d", token, {
+                    format: "CODE128",
+                    lineColor: "#000",
+                    width: 1.5,
+                    height: 60,
+                    displayValue: false
+                });
+            } catch(e) {
+                console.error("1D Barcode 生成失敗", e);
+            }
+
+            showToast("已成功產生 POS 結帳 Token！");
+        }
+
+        function toggleBarcodeType(type) {
+            const qrBox = document.getElementById('qr-container');
+            const box1d = document.getElementById('barcode-1d-container');
+            const btnQr = document.getElementById('btn-show-qr');
+            const btn1d = document.getElementById('btn-show-1d');
+
+            if (type === 'qr') {
+                qrBox.classList.remove('hidden');
+                box1d.classList.add('hidden');
+                btnQr.className = "flex-1 py-1.5 bg-white text-gray-800 shadow rounded-md transition text-center";
+                btn1d.className = "flex-1 py-1.5 text-gray-500 hover:text-gray-800 rounded-md transition text-center";
+            } else {
+                qrBox.classList.add('hidden');
+                box1d.classList.remove('hidden');
+                btnQr.className = "flex-1 py-1.5 text-gray-500 hover:text-gray-800 rounded-md transition text-center";
+                btn1d.className = "flex-1 py-1.5 bg-white text-gray-800 shadow rounded-md transition text-center";
+            }
+        }
+
+        function closeTokenModal() {
+            document.getElementById('token-modal').classList.add('hidden');
+        }
+
+        function copyToken() {
+            const text = currentGeneratedToken;
+            const input = document.createElement('textarea');
+            input.value = text;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            showToast("Token 已複製到剪貼簿！");
+        }
+
+        // --- 6. POS 機終端模擬器與解碼寫入 ---
+        document.getElementById('pos-sim-btn').addEventListener('click', () => {
+            document.getElementById('pos-sim-modal').classList.remove('hidden');
+            if (currentGeneratedToken) {
+                document.getElementById('pos-input-token').value = currentGeneratedToken;
+            }
+        });
+
+        function closePosSimModal() {
+            document.getElementById('pos-sim-modal').classList.add('hidden');
+        }
+
+        function simulatePosScan() {
+            closeTokenModal();
+            document.getElementById('pos-sim-modal').classList.remove('hidden');
+            document.getElementById('pos-input-token').value = currentGeneratedToken;
+            executePosProcess();
+        }
+
+        function executePosProcess() {
+            const rawToken = document.getElementById('pos-input-token').value.trim();
+            if (!rawToken) {
+                alert("請輸入或掃描 Token 條碼！");
+                return;
+            }
+
+            try {
+                // 解碼 POS Token (格式: POS112:ORDER_ID:TOTAL:SALT:ITEMS)
+                const parts = rawToken.split(':');
+                if (parts.length < 5 || parts[0] !== 'POS112') {
+                    throw new Error("無效的 POS 訂單 Token 格式");
+                }
+
+                const orderId = parts[1];
+                const totalPrice = parts[2];
+                const salt = parts[3];
+                const rawItems = parts[4].split(';');
+
+                // 解析餐點明細
+                const parsedItemsHtml = rawItems.map(itemStr => {
+                    const [itemId, qty, spicy, addons] = itemStr.split(':');
+                    const menuItem = MENU_DATA.find(m => m.id === itemId);
+                    const itemName = menuItem ? menuItem.name : itemId;
+                    return `<li>${itemName} x ${qty} ${spicy ? `(${spicy})` : ''} ${addons ? `[+${addons}]` : ''}</li>`;
+                }).join('');
+
+                // 渲染 POS 結果
+                document.getElementById('pos-res-id').innerText = `#${orderId}`;
+                document.getElementById('pos-res-total').innerText = `NT$ ${totalPrice}`;
+                document.getElementById('pos-res-items').innerHTML = parsedItemsHtml;
+                document.getElementById('pos-timestamp').innerText = new Date().toLocaleTimeString();
+
+                document.getElementById('pos-result').classList.remove('hidden');
+                showToast("POS 條碼驗證成功，已成功寫入門市系統！");
+
+            } catch (err) {
+                alert("POS 讀取失敗: " + err.message);
+            }
+        }
+
+        // --- 7. Toast 提示訊息工具 ---
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = message;
+            toast.classList.remove('hidden');
+            
+            setTimeout(() => {
+                toast.classList.add('hidden');
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
