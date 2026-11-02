@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LINE 到 POS 線上點餐</title>
+    <!-- Tailwind CSS (樣式庫) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 (前端框架 CDN) -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- QRCode.js (二維碼生成庫) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- LINE LIFF SDK -->
+    <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.2s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans antialiased text-gray-900 pb-20">
+    <div id="app" class="max-w-md mx-auto bg-white min-h-screen shadow-lg flex flex-col relative">
+        
+        <!-- 頂部 Header -->
+        <header class="bg-emerald-600 text-white p-4 sticky top-0 z-10 flex justify-between items-center shadow">
+            <h1 class="text-xl font-bold flex items-center gap-2">
+                <span>🍽️</span> 美味餐廳 點餐
+            </h1>
+            <div class="flex items-center gap-2">
+                <!-- 條碼夾按鈕 (查看未結帳訂單) -->
+                <button @click="showTicketsModal = true" class="relative bg-emerald-700 hover:bg-emerald-800 text-white text-xs px-3 py-1.5 rounded-full flex items-center gap-1 font-semibold border border-emerald-500 shadow-sm transition active:scale-95">
+                    <span>🎟️ 我的條碼</span>
+                    <span v-if="activeOrders.length" class="bg-red-500 text-white text-[10px] w-4 h-4 rounded-full flex items-center justify-center font-bold animate-pulse">
+                        {{ activeOrders.length }}
+                    </span>
+                </button>
+                <!-- LINE 使用者資訊 -->
+                <span v-if="profile" class="text-xs bg-emerald-700 px-2.5 py-1 rounded-full flex items-center gap-1">
+                    <img v-if="profile.pictureUrl" :src="profile.pictureUrl" class="w-4 h-4 rounded-full" />
+                    {{ profile.displayName }}
+                </span>
+            </div>
+        </header>
+
+        <!-- 菜單列表 -->
+        <main class="p-4 space-y-4 flex-1">
+            <h2 class="font-bold text-gray-700 text-lg border-b pb-2 flex justify-between items-center">
+                <span>請勾選欲點購的餐點</span>
+                <span class="text-xs text-gray-400 font-normal">多選點餐區</span>
+            </h2>
+
+            <div class="space-y-3">
+                <div v-for="item in menu" :key="item.id" 
+                     class="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl border border-gray-200 hover:border-emerald-300 transition shadow-sm">
+                    
+                    <div class="flex-1 pr-2">
+                        <div class="font-bold text-gray-800 text-base">{{ item.name }}</div>
+                        <div class="text-sm text-emerald-600 font-semibold">NT$ {{ item.price }}</div>
+                    </div>
+
+                    <!-- 加減按鈕區 -->
+                    <div class="flex items-center gap-2 bg-white px-2 py-1 rounded-lg border shadow-inner">
+                        <button @click="updateQty(item.id, -1)" 
+                                :disabled="!cart[item.id]"
+                                class="w-7 h-7 rounded-md flex items-center justify-center font-bold text-lg bg-gray-100 text-gray-600 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-200 active:bg-gray-300">
+                            -
+                        </button>
+                        <span class="w-6 text-center font-bold text-emerald-700 text-sm">
+                            {{ cart[item.id] || 0 }}
+                        </span>
+                        <button @click="updateQty(item.id, 1)" 
+                                class="w-7 h-7 rounded-md flex items-center justify-center font-bold text-lg bg-emerald-600 text-white hover:bg-emerald-700 active:bg-emerald-800">
+                            +
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- 底部結帳/生成條碼 Bar -->
+        <footer class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 p-4 shadow-lg z-10 flex items-center justify-between">
+            <div>
+                <div class="text-xs text-gray-500">已選 <span class="font-bold text-gray-800">{{ totalCount }}</span> 件餐點</div>
+                <div class="text-xl font-extrabold text-emerald-600">NT$ {{ totalPrice }}</div>
+            </div>
+
+            <button @click="submitOrder" 
+                    :disabled="totalCount === 0 || loading"
+                    class="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white font-bold px-5 py-3 rounded-xl shadow-md transition flex items-center gap-2 active:scale-95">
+                <span v-if="loading">處理中...</span>
+                <span v-else>生成 POS 條碼 ➔</span>
+            </button>
+        </footer>
+
+        <!-- POS 掃描 QR Code 彈窗 Modal (支援多筆切換) -->
+        <div v-if="showModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl relative animate-fade-in">
+                <button @click="closeModal" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
+                
+                <h3 class="text-lg font-bold text-gray-800 mb-1">請向櫃檯出示條碼</h3>
+                <p class="text-xs text-gray-500 mb-2">POS 掃描槍感應此 QR Code 即可完成讀取</p>
+
+                <!-- 多筆訂單指示器 (當有多筆未結帳訂單時顯示) -->
+                <div v-if="activeOrders.length > 1" class="flex justify-between items-center my-2 bg-gray-100 p-2 rounded-xl">
+                    <button @click="prevOrder" :disabled="currentOrderIndex === 0" class="text-xs px-2.5 py-1 bg-white rounded border shadow-sm font-bold disabled:opacity-30">◄ 前一筆</button>
+                    <span class="text-xs font-bold text-emerald-700">訂單 {{ currentOrderIndex + 1 }} / {{ activeOrders.length }}</span>
+                    <button @click="nextOrder" :disabled="currentOrderIndex === activeOrders.length - 1" class="text-xs px-2.5 py-1 bg-white rounded border shadow-sm font-bold disabled:opacity-30">下一筆 ►</button>
+                </div>
+
+                <!-- 二維碼繪製區域 -->
+                <div class="flex justify-center my-3 bg-gray-50 p-4 rounded-xl border border-dashed border-gray-300">
+                    <div id="qrcode" class="p-2 bg-white rounded shadow-sm"></div>
+                </div>
+
+                <!-- 訂單 Token 資訊展示 -->
+                <div class="bg-emerald-50 rounded-xl p-3 text-left mb-4 border border-emerald-100">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-xs text-emerald-700 font-semibold">訂單編號 Token:</span>
+                        <span :class="currentOrder?.status === 'CONFIRMED' ? 'bg-blue-200 text-blue-800' : 'bg-emerald-200 text-emerald-800'"
+                              class="text-[10px] px-1.5 py-0.5 rounded font-bold">
+                            {{ currentOrder?.status === 'CONFIRMED' ? '已確認入單' : '待 POS 掃描' }}
+                        </span>
+                    </div>
+                    <div class="font-mono text-sm font-bold text-emerald-900 break-all select-all">{{ currentOrder?.token }}</div>
+                    
+                    <!-- 新增：訂購好友與精確時間資訊 -->
+                    <div class="mt-1.5 pt-1.5 border-t border-emerald-200/60 text-[11px] text-gray-600 flex justify-between">
+                        <span>👤 訂購人: {{ currentOrder?.userDisplayName || '未登入客戶' }}</span>
+                        <span>🕒 時間: {{ currentOrder?.createdAt }}</span>
+                    </div>
+
+                    <!-- 品項明細摘要 -->
+                    <div class="my-2 border-t border-emerald-200/60 pt-2 text-xs text-gray-700 space-y-1 max-h-24 overflow-y-auto">
+                        <div v-for="item in currentOrder?.items" :key="item.id" class="flex justify-between">
+                            <span>{{ item.name }} x {{ item.qty }}</span>
+                            <span class="font-semibold">NT$ {{ item.price * item.qty }}</span>
+                        </div>
+                    </div>
+
+                    <div class="text-[11px] text-emerald-600 border-t border-emerald-200/60 pt-1 flex justify-between font-bold">
+                        <span>總計 {{ currentOrder?.totalCount }} 件餐點</span>
+                        <span>NT$ {{ currentOrder?.totalPrice }}</span>
+                    </div>
+                </div>
+
+                <!-- 模擬 POS 掃描成功確認按鈕 (開發與測試用) -->
+                <div v-if="currentOrder?.status !== 'CONFIRMED'" class="mb-3">
+                    <button @click="simulatePOSScan" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded-lg font-bold border border-blue-700 shadow-sm transition">
+                        ⚡ 模擬 POS 機已掃描該單 (測試觸發通知)
+                    </button>
+                </div>
+
+                <p class="text-[11px] text-gray-400 mb-4">⏱️ 請於 15 分鐘內出示，掃描後自動同步</p>
+
+                <button @click="closeModal" class="w-full bg-emerald-600 text-white py-2.5 rounded-xl font-bold hover:bg-emerald-700 transition">
+                    確定 / 關閉
+                </button>
+            </div>
+        </div>
+
+        <!-- 我的條碼夾 Modal -->
+        <div v-if="showTicketsModal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl relative flex flex-col max-h-[80vh] animate-fade-in">
+                <div class="flex justify-between items-center border-b pb-3 mb-3">
+                    <h3 class="font-bold text-gray-800 text-lg flex items-center gap-1.5">
+                        <span>🎟️</span> 未結帳訂單夾 ({{ activeOrders.length }})
+                    </h3>
+                    <button @click="showTicketsModal = false" class="text-gray-400 hover:text-gray-600 font-bold text-xl">✕</button>
+                </div>
+
+                <div v-if="activeOrders.length === 0" class="py-10 text-center text-gray-400 text-sm">
+                    目前沒有等待掃描的訂單記錄 🥐
+                </div>
+
+                <!-- 未結帳訂單列表 -->
+                <div v-else class="space-y-3 overflow-y-auto flex-1 pr-1">
+                    <div v-for="(ord, idx) in activeOrders" :key="ord.token" 
+                         @click="selectOrderToDisplay(idx)"
+                         class="p-3 border rounded-xl hover:border-emerald-500 cursor-pointer transition bg-emerald-50/40 relative group shadow-sm">
+                        <div class="flex justify-between items-center text-xs text-gray-500 mb-1">
+                            <span class="font-mono font-bold text-emerald-800">{{ ord.token }}</span>
+                            <span class="text-[10px] text-gray-400">{{ ord.time }}</span>
+                        </div>
+                        <div class="text-sm font-bold text-gray-800 flex justify-between items-center">
+                            <span>共 {{ ord.totalCount }} 項餐點</span>
+                            <span class="text-emerald-600">NT$ {{ ord.totalPrice }}</span>
+                        </div>
+                        <div class="mt-2 flex justify-end">
+                            <span class="text-xs bg-emerald-600 text-white px-3 py-1 rounded-lg font-semibold shadow-sm group-hover:bg-emerald-700">出示條碼 ►</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button @click="showTicketsModal = false" class="mt-4 w-full bg-gray-100 text-gray-700 py-2.5 rounded-xl font-bold hover:bg-gray-200">
+                    返回點餐介面
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                // 請替換為您在 LINE Developers 申請到的 LIFF ID
+                const LIFF_ID = "YOUR_LIFF_ID_HERE"; 
+                const profile = ref(null);
+                const loading = ref(false);
+                const showModal = ref(false);
+                const showTicketsModal = ref(false);
+                
+                // 多筆訂單狀態管理
+                const activeOrders = ref([]);
+                const currentOrderIndex = ref(0);
+
+                // 餐廳菜單資料
+                const menu = ref([
+                    { id: 'A01', name: '招牌黑咖啡 (冰/熱)', price: 65 },
+                    { id: 'A02', name: '經典莊園拿鐵', price: 85 },
+                    { id: 'B01', name: '起司火腿三明治', price: 55 },
+                    { id: 'B02', name: '牛肉起司可頌', price: 75 },
+                    { id: 'C01', name: '日式照燒雞腿堡', price: 90 },
+                    { id: 'C02', name: '美式雙層牛肉堡', price: 120 },
+                    { id: 'D01', name: '黃金薯條 (大)', price: 45 },
+                    { id: 'D02', name: '鮮奶紅茶', price: 50 }
+                ]);
+
+                // 購物車選購數量：{ 'A01': 2, 'B01': 1 }
+                const cart = ref({});
+
+                // 目前選擇展示的訂單
+                const currentOrder = computed(() => {
+                    return activeOrders.value[currentOrderIndex.value] || null;
+                });
+
+                // 計算總數量
+                const totalCount = computed(() => {
+                    return Object.values(cart.value).reduce((sum, qty) => sum + qty, 0);
+                });
+
+                // 計算總金額
+                const totalPrice = computed(() => {
+                    return menu.value.reduce((sum, item) => {
+                        const qty = cart.value[item.id] || 0;
+                        return sum + (item.price * qty);
+                    }, 0);
+                });
+
+                // 修改餐點數量
+                const updateQty = (id, delta) => {
+                    const current = cart.value[id] || 0;
+                    const next = current + delta;
+                    if (next <= 0) {
+                        delete cart.value[id];
+                    } else {
+                        cart.value[id] = next;
+                    }
+                };
+
+                // 切換訂單條碼 - 前一筆
+                const prevOrder = () => {
+                    if (currentOrderIndex.value > 0) {
+                        currentOrderIndex.value--;
+                        renderQRCode();
+                    }
+                };
+
+                // 切換訂單條碼 - 下一筆
+                const nextOrder = () => {
+                    if (currentOrderIndex.value < activeOrders.value.length - 1) {
+                        currentOrderIndex.value++;
+                        renderQRCode();
+                    }
+                };
+
+                // 從條碼夾點選某筆訂單直接展示
+                const selectOrderToDisplay = (index) => {
+                    currentOrderIndex.value = index;
+                    showTicketsModal.value = false;
+                    showModal.value = true;
+                    renderQRCode();
+                };
+
+                // 生成新訂單並加入未結帳清單
+                const submitOrder = async () => {
+                    loading.value = true;
+                    try {
+                        const now = new Date();
+                        const dateStr = now.toISOString().slice(0,10).replace(/-/g, '');
+                        const randomStr = Math.random().toString(36).substring(2, 7).toUpperCase();
+                        const token = `ORD-${dateStr}-${randomStr}`;
+
+                        // 組合此筆訂單品項
+                        const orderItems = menu.value
+                            .filter(item => cart.value[item.id] > 0)
+                            .map(item => ({
+                                id: item.id,
+                                name: item.name,
+                                price: item.price,
+                                qty: cart.value[item.id]
+                            }));
+
+                        const newOrder = {
+                            token,
+                            // 身分與時間紀錄
+                            userId: profile.value?.userId || 'GUEST_USER_ID',
+                            userDisplayName: profile.value?.displayName || '訪客',
+                            createdAt: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                            timestamp: now.getTime(),
+                            items: orderItems,
+                            totalCount: totalCount.value,
+                            totalPrice: totalPrice.value,
+                            status: 'PENDING'
+                        };
+
+                        // 加入待掃描佇列最前端
+                        activeOrders.value.unshift(newOrder);
+                        currentOrderIndex.value = 0;
+
+                        // 如果在 LINE App 內，發送點餐文字訊息備查
+                        if (typeof liff !== 'undefined' && liff.isLoggedIn && liff.isLoggedIn() && liff.isInClient()) {
+                            const summaryText = orderItems.map(i => `${i.name} x${i.qty}`).join('\n');
+                            await liff.sendMessages([{
+                                type: 'text',
+                                text: `🧾 【點餐單建立】\n顧客：${newOrder.userDisplayName}\n單號：${token}\n時間：${newOrder.createdAt}\n明細：\n${summaryText}\n金額：NT$ ${totalPrice.value}\n\n請至櫃檯出示條碼以進行 POS 掃描。`
+                            }]);
+                        }
+
+                        cart.value = {};
+                        showModal.value = true;
+                        renderQRCode();
+
+                    } catch (err) {
+                        console.error('提交失敗', err);
+                        alert('訂單建立失敗：' + (err.message || '請重新再試'));
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                // 模擬 POS 掃描入單成功並更新狀態/發送通知
+                const simulatePOSScan = () => {
+                    if (!currentOrder.value) return;
+                    currentOrder.value.status = 'CONFIRMED';
+                    alert(`✅ POS 機已順利讀取 [${currentOrder.value.token}]\n\n系統已辨識好友身分：${currentOrder.value.userDisplayName} (ID: ${currentOrder.value.userId})\n訂單發送時間：${currentOrder.value.createdAt}\n\n已觸發 LINE Messaging API 推送：「您的訂單已成功入單處理中！」`);
+                };
+
+                // 動態繪製二維碼 (QRCode.js)
+                const renderQRCode = () => {
+                    nextTick(() => {
+                        const container = document.getElementById("qrcode");
+                        if (!container || !currentOrder.value) return;
+                        
+                        container.innerHTML = ""; // 清除舊條碼
+                        new QRCode(container, {
+                            text: currentOrder.value.token,
+                            width: 170,
+                            height: 170,
+                            colorDark: "#065f46",
+                            colorLight: "#ffffff",
+                            correctLevel: QRCode.CorrectLevel.H
+                        });
+                    });
+                };
+
+                const closeModal = () => {
+                    showModal.value = false;
+                };
+
+                // LIFF 初始化
+                onMounted(async () => {
+                    try {
+                        if (typeof liff !== 'undefined') {
+                            await liff.init({ liffId: LIFF_ID });
+                            if (liff.isLoggedIn()) {
+                                profile.value = await liff.getProfile();
+                            }
+                        }
+                    } catch (err) {
+                        console.warn("LIFF 未填寫或處於瀏覽器測試模式:", err);
+                    }
+                });
+
+                return {
+                    profile,
+                    menu,
+                    cart,
+                    loading,
+                    showModal,
+                    showTicketsModal,
+                    activeOrders,
+                    currentOrderIndex,
+                    currentOrder,
+                    totalCount,
+                    totalPrice,
+                    updateQty,
+                    submitOrder,
+                    closeModal,
+                    prevOrder,
+                    nextOrder,
+                    selectOrderToDisplay,
+                    simulatePOSScan
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
